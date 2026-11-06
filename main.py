@@ -94,9 +94,27 @@ def task1_pipelines():
 
     # full pipeline
     categorical, numeric = feature_columns(trainDF)
-    # TODO: indexer, encoder, assembler, LinearRegression; fit the Pipeline on trainDF;
-    #       results.append(evaluate("full", <predictions on testDF>)); save the model
-    return None
+    indexed = [f"{column}_indexed" for column in categorical]
+    encoded = [f"{column}_encoded" for column in categorical]
+    indexer = StringIndexer(
+        inputCols=categorical,
+        outputCols=indexed,
+        handleInvalid="skip",
+    )
+    encoder = OneHotEncoder(inputCols=indexed, outputCols=encoded)
+    assembler = VectorAssembler(
+        inputCols=encoded + numeric,
+        outputCol="features",
+    )
+    full_lr = LinearRegression(featuresCol="features", labelCol="price")
+    full_pipeline = Pipeline(
+        stages=[indexer, encoder, assembler, full_lr]
+    )
+    full_model = full_pipeline.fit(trainDF)
+    results.append(evaluate("full", full_model.transform(testDF)))
+    full_model.write().overwrite().save(model_dir)
+    print(f"saved to {model_dir}")
+    return results
 
 
 # ---------------------------------------------------------------- Task 2: score with the saved model
@@ -107,8 +125,24 @@ def task2_score():
     output/task2/predictions. Print the stage class names of the loaded model and the
     RMSE of its predictions. Return the DataFrame you wrote.
     """
-    # TODO
-    return None
+    model = PipelineModel.load(model_dir)
+    print("stages:", ", ".join(stage.__class__.__name__ for stage in model.stages))
+    testDF = load_split()[1]
+    predictions = model.transform(testDF)
+    evaluate("full", predictions)
+    output = predictions.select(
+        "neighbourhood_cleansed",
+        "room_type",
+        "bedrooms",
+        "price",
+        sround("prediction", 1).alias("prediction"),
+    )
+    output.write.mode("overwrite").option("header", True).csv(
+        f"{out_dir}/predictions"
+    )
+    output.orderBy("neighbourhood_cleansed", "room_type", "bedrooms").show(5, truncate=False)
+    print(f"saved to {out_dir}/predictions")
+    return output
 
 
 # ---------------------------------------------------------------- main
